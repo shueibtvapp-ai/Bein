@@ -47,18 +47,15 @@ jobs:
           }
 
           def find_m3u8_from_info(info):
-              # search formats for HLS manifests
               for f in info.get("formats", []) or []:
                   url = f.get("url") or ""
                   proto = str(f.get("protocol") or "").lower()
                   ext = str(f.get("ext") or "").lower()
                   if ext == "m3u8" or "m3u8" in proto or ".m3u8" in url or "manifest" in url:
                       return url
-              # fallback: sometimes info.url points to a manifest
               url = info.get("url") or ""
               if url and (".m3u8" in url or "manifest" in url):
                   return url
-              # try fields that may contain manifest
               for f in info.get("formats", []) or []:
                   m = f.get("manifest_url") or f.get("manifest") or ""
                   if m and (".m3u8" in m or "manifest" in m):
@@ -75,7 +72,6 @@ jobs:
                   except Exception:
                       m3u8 = None
 
-                  # preserve existing valid m3u8 if extraction failed
                   if not m3u8:
                       try:
                           with open(filename, "r") as rf:
