@@ -5,8 +5,8 @@ permissions:
 
 on:
   schedule:
-    - cron: "0 */3 * * *" # يعمل تلقائياً كل 3 ساعات
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً في أي وقت
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
 
 jobs:
   update:
@@ -32,37 +32,32 @@ jobs:
       - name: Extract streams
         run: |
           python - <<'PY'
-          import sys
+          import time
           from yt_dlp import YoutubeDL
 
-          # قائمة القنوات: (اسم الملف الذي سيتم حفظ الرابط فيه ، رابط اليوتيوب)
           channels = [
-              ("stream.txt", "https://www.youtube.com/live/2lJZPT6OljI"),        # beIN SPORTS NEWS
-              ("bein_sports.txt", "https://www.youtube.com/live/Gxs7glumXMU")    # beIN SPORTS المفتوحة
+              ("stream.txt", "https://www.youtube.com/live/2lJZPT6OljI"),
+              ("bein_sports.txt", "https://www.youtube.com/live/Gxs7glumXMU")
           ]
 
           ydl_opts = {
               "quiet": True,
               "skip_download": True,
               "noplaylist": True,
-              "format": "best",
-              # اختياري: تحسين استخراج روابط يوتيوب لجلب روابط موبايل/Android إن لزم
-              # "extractor_args": {"youtube": {"player_client": ["android"]}}
+              "format": "best"
           }
 
           for filename, url in channels:
-              print(f"جاري استخراج الرابط لـ: {filename} من {url} ...")
               try:
                   with YoutubeDL(ydl_opts) as ydl:
                       info = ydl.extract_info(url, download=False)
               except Exception as e:
-                  print(f"خطأ في yt-dlp عند معالجة {url}: {e}")
+                  print(f"error extracting {url}: {e}")
                   continue
 
               out = None
               if info:
                   formats = info.get("formats") or []
-                  # البحث عن رابط m3u8 (HLS) أولاً
                   for f in formats:
                       furl = f.get("url") or ""
                       proto = str(f.get("protocol") or "").lower()
@@ -70,7 +65,6 @@ jobs:
                           out = furl
                           break
 
-                  # fallback: أي رابط متاح
                   if not out:
                       for f in formats:
                           if f.get("url"):
@@ -83,28 +77,19 @@ jobs:
               if out:
                   try:
                       with open(filename, "w") as fh:
-                          fh.write(out.strip())
-                      print(f"تم تحديث {filename} بنجاح.")
+                          fh.write(out.strip() + "\n")
+                          fh.write(str(int(time.time())) + "\n")
+                      print("updated", filename)
                   except Exception as e:
-                      print(f"خطأ في كتابة {filename}: {e}")
+                      print(f"error writing {filename}: {e}")
               else:
-                  print(f"فشل العثور على رابط صالح لـ {filename}")
+                  print("no url for", filename)
           PY
 
-      - name: Commit and Push update (safe)
+      - name: Commit and Push
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "github-action"
-
-          # أضف الملفات التي نريد تحديثها (تغير هذا لو أسماء الملفات تختلف)
           git add stream.txt bein_sports.txt || true
-
-          # إذا لا توجد تغييرات مجمعة (staged) نخرج بدون خطأ
-          if git diff --cached --quiet; then
-            echo "لا توجد تغييرات للمزامنة"
-            exit 0
-          fi
-
-          # وإلا قم بالـ commit + push
-          git commit -m "تحديث تلقائي لروابط القنوات"
-          git push
+          git commit -m "auto update streams $(date +%s)" || true
+          git push || true
