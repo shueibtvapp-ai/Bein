@@ -29,10 +29,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install yt-dlp
 
-      - name: Extract streams and write files
+      - name: Extract m3u8 streams and write files
         run: |
           python - <<'PY'
-          import time
           from yt_dlp import YoutubeDL
 
           channels = [
@@ -40,47 +39,63 @@ jobs:
             ("bein_sports.txt", "https://www.youtube.com/live/Gxs7glumXMU")
           ]
 
-          ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True, "format": "best"}
+          ydl_opts = {
+              "quiet": True,
+              "skip_download": True,
+              "noplaylist": True,
+              "format": "best"
+          }
+
+          def find_m3u8_from_info(info):
+              # search formats for HLS manifests
+              for f in info.get("formats", []) or []:
+                  url = f.get("url") or ""
+                  proto = str(f.get("protocol") or "").lower()
+                  ext = str(f.get("ext") or "").lower()
+                  # common indicators for HLS manifest
+                  if ext == "m3u8" or "m3u8" in proto or ".m3u8" in url or "manifest" in url:
+                      return url
+              # fallback: sometimes info.url points to a manifest
+              url = info.get("url") or ""
+              if url and (".m3u8" in url or "manifest" in url):
+                  return url
+              # try thumbnails or formats' manifest_url fields if present
+              for f in info.get("formats", []) or []:
+                  m = f.get("manifest_url") or f.get("manifest") or ""
+                  if m and (".m3u8" in m or "manifest" in m):
+                      return m
+              return None
 
           with YoutubeDL(ydl_opts) as ydl:
-              for filename, url in channels:
-                  out = None
+              for filename, yt_url in channels:
+                  m3u8 = None
                   try:
-                      info = ydl.extract_info(url, download=False)
-                      formats = info.get("formats") or []
-                      for f in formats:
-                          furl = f.get("url") or ""
-                          proto = str(f.get("protocol") or "").lower()
-                          if "m3u8" in proto or ".m3u8" in furl or "manifest" in furl:
-                              out = furl
-                              break
-                      if not out:
-                          for f in formats:
-                              if f.get("url"):
-                                  out = f.get("url")
-                                  break
-                      if not out:
-                          out = info.get("url")
-                  except Exception:
-                      out = None
+                      info = ydl.extract_info(yt_url, download=False)
+                      if info:
+                          m3u8 = find_m3u8_from_info(info)
+                  except Exception as e:
+                      # extraction error - keep m3u8 as None
+                      m3u8 = None
 
-                  if out is None:
+                  # if we didn't find a new m3u8, try to preserve existing file content (if any)
+                  if not m3u8:
                       try:
                           with open(filename, "r") as rf:
                               for line in rf:
-                                  if line.strip().startswith("http"):
-                                      out = line.strip()
+                                  line = line.strip()
+                                  if line.startswith("http") and (".m3u8" in line or "manifest" in line or "googlevideo.com" in line):
+                                      m3u8 = line
                                       break
                       except Exception:
-                          out = ""
+                          m3u8 = ""
 
+                  # ensure file always contains either the found m3u8 or empty line
                   try:
-                      with open(filename, "w") as fh:
-                          if out:
-                              fh.write(out.strip() + "\n")
+                      with open(filename, "w") as wf:
+                          if m3u8:
+                              wf.write(m3u8.strip() + "\n")
                           else:
-                              fh.write("\n")
-                          fh.write(str(int(time.time())) + "\n")
+                              wf.write("\n")
                   except Exception:
                       pass
           PY
@@ -90,5 +105,5 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "github-action"
           git add stream.txt bein_sports.txt || true
-          git commit -m "auto update streams $(date +%s)" || true
+          git commit -m "auto update m3u8 streams $(date -u +%s)" --allow-empty || true
           git push || true
