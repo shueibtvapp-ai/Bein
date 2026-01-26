@@ -1,5 +1,8 @@
 name: Update YouTube Stream
 
+permissions:
+  contents: write
+
 on:
   schedule:
     - cron: "0 */3 * * *"
@@ -27,17 +30,25 @@ jobs:
       - name: Extract stream
         run: |
           python - <<'PY'
+          import sys
           from yt_dlp import YoutubeDL
           url = "https://www.youtube.com/live/2lJZPT6OljI"
-          ydl_opts = {"quiet": True, "skip_download": True}
-          with YoutubeDL(ydl_opts) as ydl:
-              info = ydl.extract_info(url, download=False)
+          ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True}
+          try:
+              with YoutubeDL(ydl_opts) as ydl:
+                  info = ydl.extract_info(url, download=False)
+          except Exception as e:
+              print("yt-dlp extract error:", e)
+              sys.exit(0)
           out = None
           if info:
               formats = info.get("formats") or []
               for f in formats:
-                  if f.get("ext") == "m3u8" or "m3u8" in str(f.get("protocol", "")).lower() or ("manifest" in str(f.get("url",""))):
-                      out = f.get("url")
+                  furl = f.get("url") or ""
+                  proto = str(f.get("protocol") or "").lower()
+                  ext = (f.get("ext") or "").lower()
+                  if ext == "m3u8" or "m3u8" in proto or ".m3u8" in furl or "manifest" in furl:
+                      out = furl
                       break
               if not out:
                   for f in formats:
@@ -47,10 +58,15 @@ jobs:
               if not out:
                   out = info.get("url")
           if not out:
-              raise SystemExit("no-stream-url")
-          with open("stream.txt", "w") as fh:
-              fh.write(out.strip())
-          print(out)
+              print("no stream url found")
+              sys.exit(0)
+          try:
+              with open("stream.txt", "w") as fh:
+                  fh.write(out.strip())
+              print(out)
+          except Exception as e:
+              print("write error:", e)
+              sys.exit(0)
           PY
 
       - name: Commit update
