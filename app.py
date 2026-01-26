@@ -8,17 +8,30 @@ session = requests.Session()
 CACHE_TTL = 30
 manifest_cache = {"content": None, "ts": 0}
 
-def read_stream_file():
+def read_stream_file(path="stream.txt"):
+    """
+    Return first http line from the file (the actual m3u8 URL).
+    This ignores timestamps or extra lines.
+    """
     try:
-        return open("stream.txt").read().strip()
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("http"):
+                    return line
     except Exception:
-        return ""
+        pass
+    return ""
 
 def get_manifest(url):
     now = time.time()
     if now - manifest_cache["ts"] < CACHE_TTL and manifest_cache["content"]:
         return manifest_cache["content"]
-    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.youtube.com/", "Origin": "https://www.youtube.com"}
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.youtube.com/",
+        "Origin": "https://www.youtube.com"
+    }
     try:
         r = session.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
@@ -38,10 +51,18 @@ def proxy():
     url = read_stream_file()
     if not url:
         return "جاري تهيئة البث حاول مرة أخرى...", 503
-    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.youtube.com/", "Origin": "https://www.youtube.com"}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.youtube.com/",
+        "Origin": "https://www.youtube.com"
+    }
+    # forward Range if client requested a byte range (useful for segments)
     if "Range" in request.headers:
         headers["Range"] = request.headers["Range"]
+
     try:
+        # stream the response from the actual m3u8 (or to .ts segments later)
         r = session.get(url, headers=headers, stream=True, allow_redirects=True, timeout=15)
     except Exception:
         return "جاري تهيئة البث حاول مرة أخرى...", 503
@@ -57,7 +78,14 @@ def proxy():
             except Exception:
                 pass
 
-    return Response(generate(), status=r.status_code, headers={"Content-Type": r.headers.get("Content-Type", "application/vnd.apple.mpegurl"), "Access-Control-Allow-Origin": "*", "Accept-Ranges": "bytes"})
+    content_type = r.headers.get("Content-Type", "application/vnd.apple.mpegurl")
+    return Response(generate(),
+                    status=r.status_code,
+                    headers={
+                        "Content-Type": content_type,
+                        "Access-Control-Allow-Origin": "*",
+                        "Accept-Ranges": "bytes"
+                    })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
