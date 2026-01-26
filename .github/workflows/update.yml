@@ -34,11 +34,14 @@ jobs:
           python - <<'PY'
           import time
           from yt_dlp import YoutubeDL
+
           channels = [
             ("stream.txt", "https://www.youtube.com/live/2lJZPT6OljI"),
             ("bein_sports.txt", "https://www.youtube.com/live/Gxs7glumXMU")
           ]
+
           ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True, "format": "best"}
+
           with YoutubeDL(ydl_opts) as ydl:
               for filename, url in channels:
                   out = None
@@ -60,6 +63,7 @@ jobs:
                           out = info.get("url")
                   except Exception:
                       out = None
+
                   if out is None:
                       try:
                           with open(filename, "r") as rf:
@@ -69,6 +73,7 @@ jobs:
                                       break
                       except Exception:
                           out = ""
+
                   try:
                       with open(filename, "w") as fh:
                           if out:
