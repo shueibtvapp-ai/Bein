@@ -1,0 +1,11 @@
+{
+  "section": "News",
+  "channels": [
+    {
+      "id": "bein_sport_news",
+      "title": "Bein Sport News",
+      "url": "https://bein-production-dcf5.up.railway.app/bein",
+      "icon": "https://cdn.jsdelivr.net/gh/shueibtvapp-ai/Logo@main/beinNews.jpg"
+    }
+  ]
+}
