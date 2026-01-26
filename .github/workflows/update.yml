@@ -26,7 +26,32 @@ jobs:
 
       - name: Extract stream
         run: |
-          yt-dlp -g https://www.youtube.com/live/2lJZPT6OljI > stream.txt || echo ""
+          python - <<'PY'
+          from yt_dlp import YoutubeDL
+          url = "https://www.youtube.com/live/2lJZPT6OljI"
+          ydl_opts = {"quiet": True, "skip_download": True}
+          with YoutubeDL(ydl_opts) as ydl:
+              info = ydl.extract_info(url, download=False)
+          out = None
+          if info:
+              formats = info.get("formats") or []
+              for f in formats:
+                  if f.get("ext") == "m3u8" or "m3u8" in str(f.get("protocol", "")).lower() or ("manifest" in str(f.get("url",""))):
+                      out = f.get("url")
+                      break
+              if not out:
+                  for f in formats:
+                      if f.get("url"):
+                          out = f.get("url")
+                          break
+              if not out:
+                  out = info.get("url")
+          if not out:
+              raise SystemExit("no-stream-url")
+          with open("stream.txt", "w") as fh:
+              fh.write(out.strip())
+          print(out)
+          PY
 
       - name: Commit update
         run: |
