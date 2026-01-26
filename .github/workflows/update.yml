@@ -13,9 +13,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -31,64 +33,78 @@ jobs:
         run: |
           python - <<'PY'
           import sys
-          import os
           from yt_dlp import YoutubeDL
-          
+
           # قائمة القنوات: (اسم الملف الذي سيتم حفظ الرابط فيه ، رابط اليوتيوب)
           channels = [
               ("stream.txt", "https://www.youtube.com/live/2lJZPT6OljI"),        # beIN SPORTS NEWS
               ("bein_sports.txt", "https://www.youtube.com/live/Gxs7glumXMU")    # beIN SPORTS المفتوحة
           ]
-          
+
           ydl_opts = {
-              "quiet": True, 
-              "skip_download": True, 
+              "quiet": True,
+              "skip_download": True,
               "noplaylist": True,
-              "format": "best"
+              "format": "best",
+              # اختياري: تحسين استخراج روابط يوتيوب لجلب روابط موبايل/Android إن لزم
+              # "extractor_args": {"youtube": {"player_client": ["android"]}}
           }
-          
+
           for filename, url in channels:
-              print(f"جاري استخراج الرابط لـ: {filename}...")
+              print(f"جاري استخراج الرابط لـ: {filename} من {url} ...")
               try:
                   with YoutubeDL(ydl_opts) as ydl:
                       info = ydl.extract_info(url, download=False)
-                      
-                  out = None
-                  if info:
-                      formats = info.get("formats") or []
-                      # البحث عن رابط m3u8 (HLS)
-                      for f in formats:
-                          furl = f.get("url") or ""
-                          proto = str(f.get("protocol") or "").lower()
-                          if "m3u8" in proto or ".m3u8" in furl:
-                              out = furl
-                              break
-                      
-                      # إذا لم يجد m3u8 يبحث عن أي رابط متاح
-                      if not out:
-                          for f in formats:
-                              if f.get("url"):
-                                  out = f.get("url")
-                                  break
-                                  
-                      if not out:
-                          out = info.get("url")
+              except Exception as e:
+                  print(f"خطأ في yt-dlp عند معالجة {url}: {e}")
+                  continue
 
-                  if out:
+              out = None
+              if info:
+                  formats = info.get("formats") or []
+                  # البحث عن رابط m3u8 (HLS) أولاً
+                  for f in formats:
+                      furl = f.get("url") or ""
+                      proto = str(f.get("protocol") or "").lower()
+                      if "m3u8" in proto or ".m3u8" in furl or "manifest" in furl:
+                          out = furl
+                          break
+
+                  # fallback: أي رابط متاح
+                  if not out:
+                      for f in formats:
+                          if f.get("url"):
+                              out = f.get("url")
+                              break
+
+                  if not out:
+                      out = info.get("url")
+
+              if out:
+                  try:
                       with open(filename, "w") as fh:
                           fh.write(out.strip())
                       print(f"تم تحديث {filename} بنجاح.")
-                  else:
-                      print(f"فشل العثور على رابط لـ {filename}")
-
-              except Exception as e:
-                  print(f"حدث خطأ أثناء معالجة {url}: {e}")
+                  except Exception as e:
+                      print(f"خطأ في كتابة {filename}: {e}")
+              else:
+                  print(f"فشل العثور على رابط صالح لـ {filename}")
           PY
 
-      - name: Commit and Push update
+      - name: Commit and Push update (safe)
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "github-action"
-          git add stream.txt bein_sports.txt
-          git commit -m "تحديث تلقائي لروابط القنوات" || echo "لا توجد تغييرات للمزامنة"
+
+          # أضف الملفات التي نريد تحديثها (تغير هذا لو أسماء الملفات تختلف)
+          git add stream.txt bein_sports.txt || true
+
+          # إذا لا توجد تغييرات مجمعة (staged) نخرج بدون خطأ
+          if git diff --cached --quiet; then
+            echo "لا توجد تغييرات للمزامنة"
+            exit 0
+          fi
+
+          # وإلا قم بالـ commit + push
+          git commit -m "تحديث تلقائي لروابط القنوات"
           git push
