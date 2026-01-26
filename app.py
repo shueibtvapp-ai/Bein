@@ -1,63 +1,64 @@
 import time
-import subprocess
-from flask import Flask, redirect
+import os
+from flask import Flask, Response, request
+import requests
 
 app = Flask(__name__)
+session = requests.Session()
+CACHE_TTL = 30
+manifest_cache = {"content": None, "ts": 0}
 
-# --- إعدادات البث ---
-# رابط قناة beIN الإخبارية
-YOUTUBE_URL = "https://www.youtube.com/watch?v=2lJZPT6OljI"
-# مدة التحديث: 3 ساعات (بالثواني: 3 * 60 * 60 = 10800)
-CACHE_DURATION = 10800 
+def read_stream_file():
+    try:
+        return open("stream.txt").read().strip()
+    except Exception:
+        return ""
 
-# --- متغيرات التخزين المؤقت (لخدمة 100 مستخدم بدون حظر) ---
-cached_m3u8 = None
-last_update_time = 0
+def get_manifest(url):
+    now = time.time()
+    if now - manifest_cache["ts"] < CACHE_TTL and manifest_cache["content"]:
+        return manifest_cache["content"]
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.youtube.com/", "Origin": "https://www.youtube.com"}
+    try:
+        r = session.get(url, headers=headers, timeout=15)
+        if r.status_code == 200:
+            manifest_cache["content"] = r.content
+            manifest_cache["ts"] = now
+            return manifest_cache["content"]
+    except Exception:
+        return None
+    return None
 
-def get_cached_stream():
-    global cached_m3u8, last_update_time
-    
-    current_time = time.time()
-    
-    # الشرط: إذا كان الرابط فارغاً أو مر عليه أكثر من 3 ساعات
-    if cached_m3u8 is None or (current_time - last_update_time > CACHE_DURATION):
-        print("جاري تحديث الرابط من يوتيوب...")
-        try:
-            # استخدام yt-dlp لاستخراج الرابط المباشر
-            # الأمر -g يجلب الرابط، و -f 96 يختار جودة متوسطة/جيدة لضمان الثبات (أو احذفه لأفضل جودة)
-            command = ["yt-dlp", "-g", YOUTUBE_URL]
-            
-            # تنفيذ الأمر
-            new_url = subprocess.check_output(command).decode('utf-8').strip()
-            
-            # التأكد من أن الرابط صالح
-            if "http" in new_url:
-                cached_m3u8 = new_url
-                last_update_time = current_time
-                print("تم تحديث الرابط بنجاح!")
-            else:
-                print("فشل الاستخراج، سنستخدم الرابط القديم إن وجد")
-                
-        except Exception as e:
-            print(f"حدث خطأ أثناء التحديث: {e}")
-            
-    return cached_m3u8
-
-@app.route('/')
+@app.route("/")
 def home():
-    return "BEIN SERVER IS RUNNING (Use /bein to watch)"
+    return "BEIN SERVER IS RUNNING (Use /bein)"
 
-@app.route('/bein')
-def redirect_to_stream():
-    stream_url = get_cached_stream()
-    
-    if stream_url:
-        # توجيه المستخدم للرابط المباشر
-        return redirect(stream_url, code=302)
-    else:
-        return "جاري تهيئة البث، حاول مرة أخرى بعد ثوانٍ...", 503
+@app.route("/bein")
+def proxy():
+    url = read_stream_file()
+    if not url:
+        return "جاري تهيئة البث حاول مرة أخرى...", 503
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.youtube.com/", "Origin": "https://www.youtube.com"}
+    if "Range" in request.headers:
+        headers["Range"] = request.headers["Range"]
+    try:
+        r = session.get(url, headers=headers, stream=True, allow_redirects=True, timeout=15)
+    except Exception:
+        return "جاري تهيئة البث حاول مرة أخرى...", 503
 
-if __name__ == '__main__':
-    # تشغيل السيرفر
-    app.run(host='0.0.0.0', port=10000)
+    def generate():
+        try:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        finally:
+            try:
+                r.close()
+            except Exception:
+                pass
 
+    return Response(generate(), status=r.status_code, headers={"Content-Type": r.headers.get("Content-Type", "application/vnd.apple.mpegurl"), "Access-Control-Allow-Origin": "*", "Accept-Ranges": "bytes"})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
